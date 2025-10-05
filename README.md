@@ -56,6 +56,9 @@ print(finnhub_client.market_holiday(exchange='US'))
 print(finnhub_client.market_status(exchange='US'))
 ```
 
+```
+import yfinance as yf
+
 @mcp.tool()
 def get_stock_history(ticker: str) -> dict:
     """
@@ -67,7 +70,7 @@ def get_stock_history(ticker: str) -> dict:
 
         history = stock.history(period="7d")
 
-        if history.empty
+        if history.empty:
             return {"error": f"no history found for this ticker {ticker}"}
 
         history.reset_index()
@@ -77,3 +80,5 @@ def get_stock_history(ticker: str) -> dict:
         return {"dates": dates, "prices": prices}
     except Exception as e:
         return {"error": str(e)}
+
+```
