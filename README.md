@@ -73,11 +73,12 @@ def get_stock_history(ticker: str) -> dict:
         if history.empty:
             return {"error": f"no history found for this ticker {ticker}"}
 
-        history.reset_index()
-        dates = history['Dates'].dt_strftime('%Y-%m-%d').toList()
-        prices = history['Close'].toList()
+        history.reset_index(inplace=True)
+        dates = history['Date'].dt.strftime('%Y-%m-%d').tolist()
+        prices = history['Close'].tolist()
 
         return {"dates": dates, "prices": prices}
+    
     except Exception as e:
         return {"error": str(e)}
 

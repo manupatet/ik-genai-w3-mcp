@@ -3,7 +3,7 @@ import os
 from mcp.server.fastmcp import FastMCP 
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from yfinance import yf
+import yfinance as yf
 
 load_dotenv()
 
@@ -28,17 +28,18 @@ def get_stock_history(ticker: str) -> dict:
 
         history = stock.history(period="7d")
 
-        if history.empty
+        if history.empty:
             return {"error": f"no history found for this ticker {ticker}"}
 
-        history.reset_index()
-        dates = history['Dates'].dt_strftime('%Y-%m-%d').toList()
-        prices = history['Close'].toList()
+        history.reset_index(inplace=True)
+        dates = history['Date'].dt.strftime('%Y-%m-%d').tolist()
+        prices = history['Close'].tolist()
 
         return {"dates": dates, "prices": prices}
+    
     except Exception as e:
         return {"error": str(e)}
-
+        
 # --- THESE TOOLS STILL USE FINNHUB ---
 @mcp.tool()
 def get_latest_quote(ticker: str) -> dict:
