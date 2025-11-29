@@ -10,7 +10,6 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 RUN curl -fsSL https://api.instatunnel.my/releases/install.sh | bash
-RUN chmod +x instatunnel
 
 WORKDIR /app
 COPY . /app
