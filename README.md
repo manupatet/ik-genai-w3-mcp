@@ -127,8 +127,6 @@ print(finnhub_client.market_status(exchange='US'))
 The method
 
 ```
-import yfinance as yf
-
 @mcp.tool()
 def get_stock_history(ticker: str) -> dict:
     """
