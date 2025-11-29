@@ -22,6 +22,73 @@ Run client using: `uv run mcp_client.py` and click “Open in browser”.
 On the new browser window that opens, use the gradio UI to communicate with your App.
 MCP inspector tool: `npx @modelcontextprotocol/inspector`
 
+
+## MCP Protocol 
+
+Here's a sequence diagram:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User
+    participant MCPClient as MCP Client
+    participant LLM as LLM
+    participant MCPServer as MCP Finance Server
+    participant API1 as getTickerSymbol()
+    participant API2 as getSymbolPrice()
+
+    User->>MCPClient: "What is the price of Apple stock?"
+    MCPClient->>LLM: Forward user query
+
+    Note over MCPClient,MCPServer: MCP Handshake Phase (Expanded)
+
+    MCPClient->>MCPServer: Open TCP/WebSocket/STDIO Transport
+    MCPServer-->>MCPClient: Transport ACK
+
+    MCPClient->>MCPServer: ClientHello<br/>{protocolVersion, encoding, compression}
+    MCPServer-->>MCPClient: ServerHello<br/>{selectedVersion, encoding, compression}
+
+    MCPClient->>MCPServer: AuthInit<br/>{clientId, apiKey/OAuth/JWT}
+    MCPServer-->>MCPClient: AuthAck<br/>{sessionId, expiry, scopes}
+
+    MCPClient->>MCPServer: DescribeClientCapabilities<br/>{toolInvocation, streaming, batching}
+    MCPServer-->>MCPClient: DescribeServerCapabilities<br/>{tools, resources, prompts}
+
+    MCPServer-->>MCPClient: ToolManifest<br/>{getTickerSymbol, getSymbolPrice}
+    MCPServer-->>MCPClient: JSON Schemas for Tools
+    MCPClient->>MCPServer: ToolSchemaACK
+
+    MCPServer-->>MCPClient: Available Resources<br/>(marketData, fundamentals)
+    MCPServer-->>MCPClient: Available Prompts<br/>(finance-agent, trader-agent)
+
+    MCPClient->>MCPServer: ClientReady
+    MCPServer-->>MCPClient: ServerReady
+
+    MCPClient->>MCPServer: Heartbeat Ping
+    MCPServer-->>MCPClient: Heartbeat Pong
+
+    Note over LLM: Determines it needs ticker symbol → price<br/>Uses MCP tools
+
+    LLM->>MCPClient: Tool Call: getTickerSymbol("Apple")
+
+    MCPClient->>MCPServer: Request getTickerSymbol("Apple")
+    MCPServer->>API1: getTickerSymbol("Apple")
+    API1-->>MCPServer: "AAPL" (ticker_symbol)
+    MCPServer-->>MCPClient: Result: "AAPL"
+    MCPClient-->>LLM: Return tool result ("AAPL")
+
+    LLM->>MCPClient: Tool Call: getSymbolPrice("AAPL")
+    MCPClient->>MCPServer: Request getSymbolPrice("AAPL")
+    MCPServer->>API2: getSymbolPrice("AAPL")
+    API2-->>MCPServer: 195.44 (double)
+    MCPServer-->>MCPClient: Result: 195.44
+    MCPClient-->>LLM: Return tool result (195.44)
+
+    LLM-->>MCPClient: Final natural language answer
+    MCPClient-->>User: "Apple (AAPL) is trading at $195.44."
+```
+
+
 ###Appendix
 Free APIs on finnhub:
 ```
