@@ -89,8 +89,9 @@ sequenceDiagram
 ```
 
 
-###Appendix
-Free APIs on finnhub:
+### Appendix
+
+Freely available APIs on finnhub:
 ```
 print(finnhub_client.company_basic_financials('AAPL', 'all'))
 print(finnhub_client.company_earnings('TSLA', limit=5))
@@ -122,6 +123,8 @@ print(finnhub_client.stock_usa_spending("LMT", "2021-01-01", "2022-06-15"))
 print(finnhub_client.market_holiday(exchange='US'))
 print(finnhub_client.market_status(exchange='US'))
 ```
+
+The method
 
 ```
 import yfinance as yf
