@@ -7,17 +7,15 @@ import yfinance as yf
 
 load_dotenv()
 
-# --- Configuration ---
 FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY")
 if not FINNHUB_API_KEY:
     raise ValueError("Please set the FINNHUB_API_KEY environment variable.")
 
 finnhub_client = finnhub.Client(api_key=FINNHUB_API_KEY)
 
-# --- MCP Server Definition ---
 mcp = FastMCP("finnhub-MCP-server")
 
-# --- PROMPTS (The "Brain" of the operation) ---
+# --- The "Plan"
 @mcp.prompt()
 def analyze_stock(ticker: str) -> str:
     """
@@ -49,7 +47,7 @@ def analyze_stock(ticker: str) -> str:
        - If any data is missing (returns error), mention it in the report but continue the analysis with what you have.
     """
 
-# --- TOOLS (The "Hands" of the operation) ---
+# --- The "Tools"
 
 @mcp.tool()
 def get_stock_history(ticker: str) -> str:
