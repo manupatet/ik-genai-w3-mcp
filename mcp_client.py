@@ -8,7 +8,7 @@ import os
 from datetime import datetime
 import traceback
 import inspect
-from typing import List
+from typing import Any, Callable, Dict
 
 # --- GenAI and MCP Imports ---
 import google.generativeai as genai
@@ -17,43 +17,25 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import CallToolResult
 
+# Import protobuf types for manual function response construction
+from google.ai.generativelanguage_v1beta.types import Part, FunctionResponse
+
 from dotenv import load_dotenv
 
 load_dotenv()
-# --- Configure Google AI ---
 if not os.environ.get("GEMINI_API_KEY"):
     raise ValueError("Please set the GEMINI_API_KEY environment variable.")
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
-# --- Helper function for JSON parsing ---
-def parse_json_response(res: CallToolResult) -> str:
-    """Parse a response object with .content (list of items having .text)
-    and return a stringified JSON (always str)."""
-    try:
-        content = res.content
-        if not content:
-            return json.dumps({"error": "No content received"})
 
-        if len(content) == 1:
-            data = json.loads(content[0].text)
-        else:
-            data = [json.loads(item.text) for item in content]
-
-        return json.dumps(data)
-    except json.JSONDecodeError as e:
-        if content and hasattr(content[0], 'text'):
-            return json.dumps({"error": f"JSON decode error: {e}", "raw_text": content[0].text})
-        return json.dumps({"error": f"JSON decode error: {e}"})
-    except Exception as e:
-        return json.dumps({"error": f"An unexpected error occurred during parsing: {e}"})
-
-
-# --- Local Report-Building Tools ---
-# These tools DO NOT fetch data. They render it.
+# --- Local Client Capabilities (Visualizations) ---
 
 def plot_historical_price_chart(data_json: str) -> plt.Figure:
+    """Plots a 7-day price history chart."""
     try:
-        history_data = json.loads(data_json)
+        if isinstance(data_json, dict): history_data = data_json
+        else: history_data = json.loads(data_json)
+        
         if "error" in history_data or not history_data.get('dates') or not history_data.get('prices'):
             return None
 
@@ -68,225 +50,204 @@ def plot_historical_price_chart(data_json: str) -> plt.Figure:
         fig.autofmt_xdate()
         plt.tight_layout(pad=2.0)
         return fig
-    except Exception as e:
+    except Exception:
         return None
 
 def plot_analyst_recommendations_chart(data_json: str) -> plt.Figure:
-    """
-    Accepts analyst recommendation data in JSON format and plots a bar chart.
-    The JSON should contain keys like 'strongBuy', 'buy', 'hold', 'sell', 'strongSell'.
-    """
+    """Plots analyst recommendation trends."""
     try:
-        trends_data = json.loads(data_json)
+        if isinstance(data_json, (dict, list)): trends_data = data_json
+        else: trends_data = json.loads(data_json)
+        
         trend = trends_data[0] if isinstance(trends_data, list) and trends_data else trends_data
-        if "error" in trend:
-             raise ValueError("Invalid or error data provided for recommendations chart.")
-
+        
         fig, ax = plt.subplots(figsize=(10, 5))
         labels = ['Strong Sell', 'Sell', 'Hold', 'Buy', 'Strong Buy']
         counts = [trend.get(k, 0) for k in ['strongSell', 'sell', 'hold', 'buy', 'strongBuy']]
         colors = ['darkred', 'red', 'orange', 'skyblue', 'darkgreen']
         ax.bar(labels, counts, color=colors)
-        ax.set_title(f'Analyst Recommendations ({trend.get("period", "N/A")})', fontsize=14)
-        ax.set_ylabel('Number of Analysts')
+        ax.set_title(f'Analyst Recommendations', fontsize=14)
+        ax.set_ylabel('Count')
         plt.tight_layout(pad=2.0)
         return fig
     except Exception:
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.text(0.5, 0.5, 'Could not generate recommendations plot.\nData may be missing or invalid.',
-                ha='center', va='center', fontsize=12, color='red')
-        ax.axis('off')
-        return fig
+        return None
 
+# --- Dynamic Tool Bridge ---
 
-async def generate_financial_summary(full_context_json: str) -> str:
+def create_tool_wrapper(session: ClientSession, tool_name: str) -> Callable:
     """
-    Accepts the full data context (as a JSON string) and uses a generative model
-    to create a "Summary" and "Overall Outlook" for the report.
-    The level of detail will depend on the richness of the provided context.
+    Creates a dynamic python function that wraps the MCP 'call_tool' method.
     """
-    model = genai.GenerativeModel('gemini-2.5-flash-lite-preview-06-17')
-    prompt = f"""
-    You are a financial analyst AI. Based *only* on the data provided in the following JSON context,
-    generate a concise financial report.
+    async def tool_wrapper(**kwargs):
+        # Call the remote MCP server tool
+        result = await session.call_tool(name=tool_name, arguments=kwargs)
+        if result.content:
+            text_content = [c.text for c in result.content if hasattr(c, 'text')]
+            return "\n".join(text_content)
+        return "No content returned."
+    
+    tool_wrapper.__name__ = tool_name
+    tool_wrapper.__doc__ = f"Dynamic MCP tool: {tool_name}"
+    return tool_wrapper
 
-    The report should have two sections:
-    1.  **Summary:** A brief overview of the current stock situation based on the data.
-    2.  **Overall Outlook:** A forward-looking statement. If news data is available,
-        base the outlook on the sentiment and headlines. Otherwise, base it on price trends
-        and analyst recommendations. Be neutral if the data is conflicting or sparse.
-
-    Do not invent any information. If a piece of data (like news or quotes) is missing,
-    simply state that it was not available and adapt your analysis accordingly.
-    Format the output in markdown.
-
-    **Full Data Context:**
-    ```json
-    {full_context_json}
-    ```
-    """
-    try:
-        response = await model.generate_content_async(prompt)
-        return response.text
-    except Exception as e:
-        return f"### Error Generating Summary\nAn error occurred while communicating with the AI model: {str(e)}"
 
 async def analyze_and_plot(ticker: str):
     if not ticker:
-        return None, "Please enter a ticker symbol.", "Enter a ticker to begin."
+        return None, "Please enter a ticker symbol.", ""
 
-    full_context = {}
     async with AsyncExitStack() as stack:
         try:
-            # 1. AGGREGATE 
+            # 1. Connect to Server
             server_params = StdioServerParameters(command="python", args=["mcp_server.py"])
             read_pipe, write_pipe = await stack.enter_async_context(stdio_client(server_params))
             session = await stack.enter_async_context(ClientSession(read_pipe, write_pipe))
             await session.initialize()
 
-            available_tools = await session.list_tools()
-            tool_names = [tool.name for tool in available_tools.tools]
+            # 2. Dynamic Discovery
+            available_tools_list = await session.list_tools()
+            available_prompts_list = await session.list_prompts()
+            
+            # 3. Create Wrappers & Map
+            tool_map = {}
+            server_tool_functions = []
+            
+            # Map Server Tools
+            for tool in available_tools_list.tools:
+                wrapper = create_tool_wrapper(session, tool.name)
+                tool_map[tool.name] = wrapper
+                server_tool_functions.append(wrapper)
 
-            tasks = [session.call_tool(name=name, arguments={"ticker": ticker}) for name in tool_names]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            # Map Local Tools
+            async def local_history_wrapper(data_json): return plot_historical_price_chart(data_json)
+            async def local_rec_wrapper(data_json): return plot_analyst_recommendations_chart(data_json)
+            
+            tool_map["plot_historical_price_chart"] = local_history_wrapper
+            tool_map["plot_analyst_recommendations_chart"] = local_rec_wrapper
 
-            for name, res in zip(tool_names, results):
-                if isinstance(res, Exception):
-                    full_context[name] = json.dumps({"error": f"Failed to call tool: {res}"})
-                else:
-                    full_context[name] = parse_json_response(res)
+            # 4. Fetch Instruction
+            target_prompt_name = "analyze_stock"
+            found_prompt = next((p for p in available_prompts_list.prompts if p.name == target_prompt_name), None)
+            if not found_prompt:
+                return None, f"Server does not support prompt '{target_prompt_name}'", ""
 
-            full_context_json_str = json.dumps(full_context, indent=2)
+            prompt_result = await session.get_prompt(target_prompt_name, arguments={"ticker": ticker})
+            system_instruction = prompt_result.messages[0].content.text
 
-            # 2. DEFINE AND INVOKE AGENT WITH LOCAL TOOLS
-            local_tools = [
-                plot_historical_price_chart,
-                plot_analyst_recommendations_chart,
-                generate_financial_summary,
-            ]
-            agent = genai.GenerativeModel(
-                'gemini-2.5-flash-lite-preview-06-17',
-                tools=local_tools,
+            # 5. Initialize Model (Manual Mode)
+            local_tools = [plot_historical_price_chart, plot_analyst_recommendations_chart]
+            
+            # Safety: Ensure no duplicate tool names in list
+            # We filter server tools if they clash with local tool names (unlikely but safe)
+            local_tool_names = {t.__name__ for t in local_tools}
+            unique_server_tools = [t for t in server_tool_functions if t.__name__ not in local_tool_names]
+            
+            all_tools = unique_server_tools + local_tools
+            
+            model = genai.GenerativeModel(
+                'gemini-2.5-flash-lite',
+                tools=all_tools,
                 generation_config=GenerationConfig(temperature=0.0)
             )
+            chat = model.start_chat()
+            
+            # 6. Manual Execution Loop
+            response = await chat.send_message_async(system_instruction)
+            
+            captured_figures = []
 
-            # 3. COMPOSE AGENT PROMPT
-            prompt = f"""
-            You are an expert financial analyst. Your job is to build a report by calling the provided tools based on the data context you receive.
-            Do not make up data. Only call a tool if the required data is present and valid in the context.
+            # Loop as long as the model wants to call functions
+            while response.candidates and response.candidates[0].content.parts:
+                part = response.candidates[0].content.parts[0]
+                
+                # Check if the response contains a function call
+                if hasattr(part, 'function_call') and part.function_call:
+                    fc = part.function_call
+                    fn_name = fc.name
+                    fn_args = dict(fc.args)
+                    
+                    # Execute the tool
+                    if fn_name in tool_map:
+                        try:
+                            # Await the tool execution
+                            fn_result = await tool_map[fn_name](**fn_args)
+                            
+                            # Capture Plots Side-effect
+                            if isinstance(fn_result, plt.Figure):
+                                captured_figures.append(fn_result)
+                                api_response = {"result": "Chart generated successfully."}
+                            else:
+                                api_response = fn_result
+                                
+                        except Exception as e:
+                            api_response = {"error": str(e)}
+                    else:
+                        api_response = {"error": f"Tool {fn_name} not found"}
 
-            Here is the complete data context for the analysis of ticker '{ticker.upper()}':
-            ```json
-            {full_context_json_str}
-            ```
-            Your task is to:
-            1. Call `plot_historical_price_chart` if 'get_stock_history' data exists and is not an error.
-            2. Call `plot_analyst_recommendations_chart` if 'get_recommendation_trends' data exists and is not an error.
-            3. Finally, after analyzing all available data, call `generate_financial_summary` with the complete data context to create the textual report.
-            """
+                    # Send the result back to Gemini
+                    response_part = Part(
+                        function_response=FunctionResponse(
+                            name=fn_name,
+                            response={"result": api_response} 
+                        )
+                    )
+                    
+                    response = await chat.send_message_async([response_part])
+                else:
+                    break
 
-            # 4. EXECUTE AGENT AND RENDER RESULTS
-            response = await agent.generate_content_async(prompt)
-            # 4. EXECUTE AGENT AND RENDER RESULTS
-            tool_calls = getattr(response.candidates[0].content, "parts", []) or []
+            final_text = response.text
 
-            tool_exec_map = {
-                "plot_historical_price_chart": plot_historical_price_chart,
-                "plot_analyst_recommendations_chart": plot_analyst_recommendations_chart,
-                "generate_financial_summary": generate_financial_summary
-            }
-
-            sync_results = []
-            async_tasks = []
-
-            # --- Safety: if Gemini fails to call tools, fallback manually ---
-            called_tool_names = set()
-
-            for call in tool_calls:
-                if getattr(call, "function_call", None):
-                    fn = call.function_call
-                    called_tool_names.add(fn.name)
-                    if fn.name in tool_exec_map:
-                        tool_func = tool_exec_map[fn.name]
-                        if inspect.iscoroutinefunction(tool_func):
-                            async_tasks.append(tool_func(**fn.args))
-                        else:
-                            sync_results.append(tool_func(**fn.args))
-
-            # --- Fallback: ensure we *always* run summary even if Gemini didn't call it ---
-            if "generate_financial_summary" not in called_tool_names:
-                async_tasks.append(generate_financial_summary(full_context_json_str))
-
-            async_results = []
-            if async_tasks:
-                async_results = await asyncio.gather(*async_tasks)
-
-            tool_results = sync_results + async_results
-
-            # --- Separate plots vs summaries ---
-            figures = [res for res in tool_results if isinstance(res, plt.Figure) and res is not None]
-            summaries = [res for res in tool_results if isinstance(res, str) and res.strip()]
-
-            # --- Handle missing figures gracefully ---
+            # 7. Combine Figures
             final_plot = None
-            if len(figures) > 1:
-                combined_fig, axes = plt.subplots(len(figures), 1, figsize=(10, 5 * len(figures)))
-                if len(figures) == 1:
-                    axes = [axes]
-                for i, fig in enumerate(figures):
-                    ax_old = fig.get_axes()[0]
+            if len(captured_figures) > 1:
+                combined_fig, axes = plt.subplots(len(captured_figures), 1, figsize=(10, 5 * len(captured_figures)))
+                if len(captured_figures) == 1: axes = [axes]
+                for i, fig in enumerate(captured_figures):
                     ax_new = axes[i]
-                    ax_new.set_title(ax_old.get_title())
-                    ax_new.set_ylabel(ax_old.get_ylabel())
-                    for line in ax_old.get_lines():
-                        ax_new.plot(line.get_xdata(), line.get_ydata(),
-                                    linestyle=line.get_linestyle(),
-                                    linewidth=line.get_linewidth(),
-                                    color=line.get_color(),
-                                    marker=line.get_marker(),
-                                    markersize=line.get_markersize(),
-                                    label=line.get_label())
-                    if ax_old.patches:
-                        for bar in ax_old.patches:
-                            ax_new.add_patch(
-                                plt.Rectangle(
-                                    (bar.get_x(), bar.get_y()), bar.get_width(), bar.get_height(),
-                                    facecolor=bar.get_facecolor(), edgecolor=bar.get_edgecolor()
-                                )
-                            )
-                        ax_new.set_xlim(ax_old.get_xlim())
-                        ax_new.set_ylim(ax_old.get_ylim())
-                        ax_new.set_xticks(ax_old.get_xticks())
-                        ax_new.set_xticklabels([label.get_text() for label in ax_old.get_xticklabels()])
+                    if fig.axes:
+                        ax_old = fig.axes[0]
+                        ax_new.set_title(ax_old.get_title())
+                        ax_new.set_ylabel(ax_old.get_ylabel())
+                        
+                        # Copy lines
+                        for line in ax_old.get_lines():
+                            ax_new.plot(line.get_xdata(), line.get_ydata(), 
+                                        color=line.get_color(), marker=line.get_marker(), 
+                                        label=line.get_label())
+                        # Copy bars
+                        for patch in ax_old.patches:
+                             ax_new.add_patch(
+                                plt.Rectangle((patch.get_x(), patch.get_y()), 
+                                              patch.get_width(), patch.get_height(),
+                                              facecolor=patch.get_facecolor())
+                             )
+                        ax_new.autoscale()
                     plt.close(fig)
-                combined_fig.tight_layout(pad=3.0)
+                combined_fig.tight_layout()
                 final_plot = combined_fig
-            elif len(figures) == 1:
-                final_plot = figures[0]
+            elif len(captured_figures) == 1:
+                final_plot = captured_figures[0]
 
-            # --- Always produce a summary even if no data/plots exist ---
-            final_summary = (
-                "\n\n".join(summaries)
-                if summaries
-                else "### No data available\nCould not fetch historical or trend data for this ticker, but the app is functioning correctly."
-            )
-
-            return final_plot, f"Analysis complete for {ticker.upper()}.", final_summary
+            return final_plot, f"Analysis complete for {ticker.upper()}.", final_text
 
         except Exception as e:
             traceback.print_exc()
-            return None, f"An application error occurred: {str(e)}", ""
+            return None, f"Error: {str(e)}", ""
 
-# --- Gradio Interface (Unchanged) ---
+# --- Gradio Interface ---
 with gr.Blocks(css="footer {display: none !important}") as demo:
-    gr.Markdown("# My GenAI Investment Advisor")
-    gr.Markdown("Enter a stock ticker. The app will discover available data APIs, fetch all data, and an AI agent will dynamically build a report based on what it finds.")
+    gr.Markdown("# Agnostic MCP Investment Advisor")
+    gr.Markdown("The Client does not know how to analyze stocks. It connects to the Server, asks for instructions, and follows them.")
+    
     with gr.Row():
-        ticker_input = gr.Textbox(label="Ticker Symbol", placeholder="e.g., NVDA, MSFT, GOOG")
+        ticker_input = gr.Textbox(label="Ticker Symbol", placeholder="NVDA")
         analyze_button = gr.Button("Analyze")
+        
     status_output = gr.Textbox(label="Status", interactive=False)
     plot_output = gr.Plot(label="Visual Report")
-    summary_output = gr.Markdown(label="Stock Summary & Outlook")
+    summary_output = gr.Markdown(label="Report")
+
     analyze_button.click(
         analyze_and_plot,
         inputs=[ticker_input],
