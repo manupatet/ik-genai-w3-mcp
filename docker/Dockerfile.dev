@@ -9,7 +9,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl git unzip 
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-RUN npm install -g instatunnel
+# Install InstaTunnel directly
+RUN curl -L https://api.instatunnel.my/releases/instatunnel-linux-amd64 -o /usr/local/bin/instatunnel \
+    && chmod +x /usr/local/bin/instatunnel
 
 WORKDIR /app
 COPY . /app
