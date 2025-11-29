@@ -9,12 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl git unzip 
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-RUN curl -L https://github.com/rathole-org/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-gnu.zip \
-    -o /tmp/rathole.zip \
-    && unzip /tmp/rathole.zip -d /tmp \
-    && mv /tmp/rathole /usr/local/bin/rathole \
-    && chmod +x /usr/local/bin/rathole \
-    && rm -rf /tmp/rathole.zip
+RUN curl -fsSL https://api.instatunnel.my/releases/install.sh | bash
 
 WORKDIR /app
 COPY . /app
