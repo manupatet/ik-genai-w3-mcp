@@ -1,31 +1,75 @@
-# MCP Server for Week3 of GenAI 
+# MCP Server repo for Week3 of GenAI-Bootcamp
 
-Fork this repository
+Fork this repository to start
 
-Goto: https://finnhub.io/ and sign-up for a free API key. This API key will be used in the program to access finnhub APIs.
+Navigate to https://finnhub.io/ and sign-up for a free API key. This API key will be used in the program to access finnhub APIs.
 
-Goto `clone->codespaces`. This will open the web IDE where we can make the subsequent changes.
+Navigate to `github->clone->codespaces`. This will open the web IDE (VSCode) where your can make code changes.
 
-In the IDE that opens, create a new `.env` file (by right clicking on the files pane) and add the following lines (with correct keys):
-```
+### Setup Finhub
+
+In the IDE that opens, create a new `.env` file (by right-clicking on the files pane on the left) and adding the following lines (with correct keys):
+```sh
 FINNHUB_API_KEY=xxxxx
 GEMINI_API_KEY=xxxxxx
 ```
+
+Save the file as `.env`.
+
+### Run the MCP server
 
 Open terminal and type these commands:
 - `uv venv`
 - `source .venv/bin/activate`
 
 You’re now ready to run the MCP client and servers.
-Run client using: `uv run mcp_client.py` and click “Open in browser”.
+Run client using: 
+
+```sh
+uv run mcp_client.py
+``` 
+
+Note: It'll show a popup - no need to “Open in browser”.
 
 On the new browser window that opens, use the gradio UI to communicate with your App.
-MCP inspector tool: `npx @modelcontextprotocol/inspector`
 
+### MCP Inspector
 
-## MCP Protocol 
+MCP inspector is a debugging tool that uses model-context-protocol to connect to your server. You can use it to ensure your MCP server is up and working correctly.
 
-Here's a sequence diagram:
+To invoke MCP inspector tool: 
+
+#### On codespaces:
+
+Note your github url - it should be of the form `https://some-random-prefix.github.dev`.
+
+```sh
+$ ALLOWED_ORIGINS=https://some-random-prefix-6274.app.github.dev HOST=0.0.0.0 CLIENT_PORT=6274 SERVER_PORT=6277 npx @modelcontextprotocol/inspector
+```
+```output
+Starting MCP inspector...
+⚙️ Proxy server listening on 0.0.0.0:6277
+🔑 Session token: d9af2f42281814c74b3dbe001aba833d5c358a06a997b02be110c90e28b55fce
+   Use this token to authenticate requests or set DANGEROUSLY_OMIT_AUTH=true to disable auth
+```
+
+Note the token from the output.
+
+Open a new tab with url: `https://some-random-prefix-6274.app.github.dev/`
+This is MCP inspector tool hosted on your github VM.
+
+On this MCP tool, open "configuration" dropdown and enter 2 values:
+ 1. Inspector Proxy Address -> https://some-random-prefix-6277.app.github.dev/ (note the port is 6277 not 6274)
+ 2. Proxy Session Token: copy from MCP-inspector console output.
+
+Hit "connect", and you should see MCP-inspector come to life.
+
+#### Running locally
+Simply run: `npx @modelcontextprotocol/inspector`, and ctrl-click the URL it shows in the console, to open it in browser.
+
+## MCP Protocol Details
+
+Here's a sequence diagram of full MCP handshake and communication:
 
 ```mermaid
 sequenceDiagram
