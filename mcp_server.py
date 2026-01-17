@@ -13,7 +13,7 @@ if not FINNHUB_API_KEY:
 
 finnhub_client = finnhub.Client(api_key=FINNHUB_API_KEY)
 
-mcp = FastMCP("finnhub-MCP-server")
+mcp = FastMCP("IK-Week03-MCP-server")
 
 # --- The "Plan"
 @mcp.prompt()
@@ -23,32 +23,27 @@ def analyze_stock(ticker: str) -> str:
     This dictates the agent's behavior and workflow.
     """
     return f"""
-    You are a Senior Financial Analyst AI. Your goal is to provide a comprehensive report on the stock ticker: {ticker.upper()}.
-    
-    You have access to a set of tools to fetch data. You also have access to local visualization tools (if provided by the client environment).
-    
-    ### EXECUTION PLAN:
-    
-    1. **Data Gathering**:
-       - Call `get_stock_history` to retrieve price action for the last 7 days.
-       - Call `get_recommendation_trends` to see what analysts are saying.
-       - Call `get_company_news` to find recent context.
-       - Call `get_earnings_reports` to check for recent transcripts.
-       
-    2. **Visualization**:
-       - If you successfully retrieved history data, IMMEDIATEY call `plot_historical_price_chart` with that exact data.
-       - If you successfully retrieved recommendation trends, IMMEDIATELY call `plot_analyst_recommendations_chart` with that data.
-       
-    3. **Analysis & Summary**:
-       - Review all the data gathered.
-       - Generate a "Financial Summary" section summarizing the current state.
-       - Generate an "Overall Outlook" section based on the sentiment of the news and analyst ratings.
-       - Be professional, neutral, and data-driven. 
-       - If any data is missing (returns error), mention it in the report but continue the analysis with what you have.
+    You are a Financial Market Data Server for publicly traded equities.
+    You expose these tools, each requiring a `ticker` (string, required):
+    1. Data Gathering - For ALL tools below, you MUST pass ticker="{ticker}":
+       - Call `get_stock_history(ticker="{ticker}")` to get recent price history (e.g., last ~7 trading days of OHLCV/time-series data)..
+       - Call `get_latest_quote(ticker: "{ticker}")` the latest quote (e.g., last price, bid/ask, sizes, timestamp).
+       - Call `get_recommendation_trends(ticker="{ticker}")` to gather analyst recommendation data (e.g., buy/hold/sell counts, consensus rating, targets).
+       - Call `get_company_news(ticker="{ticker}")` to gain insights from recent company news items (e.g., id, headline, source, published_at, url, metadata)
+       - Call `get_earnings_reports(ticker="{ticker}")` to get recent earnings data (e.g., fiscal period, EPS, revenue, surprise, event time, transcript/filing links).
+
+    Behavior rules:
+    - Only call a tool when the client explicitly requests that tool by name.
+    - Do not guess which tool to use; ask the client to clarify if unclear.
+    - Validate `ticker` is present and non-empty before calling any tool; otherwise return a structured parameter error.
+    - Always return raw, structured JSON as provided by upstream sources.
+    - Do not summarize, explain, interpret, visualize, or format results beyond valid JSON.
+    - Do not perform orchestration or planning; the client is responsible for combining, analyzing, and presenting data.
+
+    The client is responsible for planning, orchestration, and presentation.
     """
 
 # --- The "Tools"
-
 @mcp.tool()
 def get_stock_history(ticker: str) -> str:
     """
