@@ -11,7 +11,7 @@ Navigate to `github->clone->codespaces`. This will open the web IDE (VSCode) whe
 In the IDE that opens, create a new `.env` file (by right-clicking on the files pane on the left) and adding the following lines (with correct keys):
 ```sh
 FINNHUB_API_KEY=xxxxx
-GEMINI_API_KEY=xxxxxx
+OPENROUTER_KEY=xxxxxx
 ```
 
 Save the file as `.env`.
